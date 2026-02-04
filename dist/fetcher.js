@@ -53,7 +53,15 @@ class CompromisedPackagesFetcher {
         try {
             // Try to fetch from remote first
             console.log(`Fetching compromised packages from: ${url}`);
-            const response = await (0, node_fetch_1.default)(url);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+            const response = await (0, node_fetch_1.default)(url, {
+                signal: controller.signal,
+                headers: {
+                    'User-Agent': 'node-pkg-scanner/1.0.0'
+                }
+            });
+            clearTimeout(timeoutId);
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }

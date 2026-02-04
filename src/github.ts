@@ -6,6 +6,7 @@ export class GitHubIntegration {
   private octokit;
   private context;
   private hasValidToken: boolean;
+  private readonly COMMENT_MARKER = '<!-- node-package-scanner-comment -->';
 
   constructor(token?: string) {
     this.context = github.context;
@@ -14,6 +15,24 @@ export class GitHubIntegration {
     
     if (this.hasValidToken) {
       this.octokit = github.getOctokit(finalToken);
+    }
+  }
+  private async findExistingComment(prNumber: number): Promise<number | null> {
+    try {
+      const comments = await this.octokit!.rest.issues.listComments({
+        owner: this.context.repo.owner,
+        repo: this.context.repo.repo,
+        issue_number: prNumber,
+      });
+
+      const existingComment = comments.data.find((comment) =>
+        comment.body?.includes(this.COMMENT_MARKER),
+      );
+
+      return existingComment?.id ?? null;
+    } catch (error) {
+      console.error("Failed to list PR comments:", error);
+      return null;
     }
   }
 
@@ -27,14 +46,26 @@ export class GitHubIntegration {
       console.log('Not running in a pull request context, skipping comment');
       return;
     }
-
+    const prNumber = this.context.payload.pull_request.number;
     const comment = this.generateComment(summary);
+    const existingCommentId = await this.findExistingComment(prNumber);
     
     try {
+      // If scanner comment already exists update it
+      if (existingCommentId) {
+        await this.octokit!.rest.issues.updateComment({
+          owner: this.context.repo.owner,
+          repo: this.context.repo.repo,
+          comment_id: existingCommentId,
+          body: comment,
+        });
+        console.log("✓ Updated existing comment on PR");
+        return;
+      }
       await this.octokit!.rest.issues.createComment({
         owner: this.context.repo.owner,
         repo: this.context.repo.repo,
-        issue_number: this.context.payload.pull_request.number,
+        issue_number: prNumber,
         body: comment
       });
       
@@ -47,7 +78,7 @@ export class GitHubIntegration {
   private generateComment(summary: ScanSummary): string {
     const { compromisedPackages, scanResults, usingCachedList } = summary;
     
-    let comment = '## 🚨 Compromised Node Package Detection\n\n';
+    let comment = `${this.COMMENT_MARKER}\n## 🚨 Compromised Node Package Detection\n\n`;
     
     if (compromisedPackages.length === 0) {
       comment += '✅ **No compromised packages detected**\n\n';

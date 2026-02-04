@@ -307,7 +307,15 @@ class CompromisedPackagesFetcher {
         try {
             // Try to fetch from remote first
             console.log(`Fetching compromised packages from: ${url}`);
-            const response = await (0, node_fetch_1.default)(url);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+            const response = await (0, node_fetch_1.default)(url, {
+                signal: controller.signal,
+                headers: {
+                    'User-Agent': 'node-pkg-scanner/1.0.0'
+                }
+            });
+            clearTimeout(timeoutId);
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
@@ -476,11 +484,27 @@ const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 class GitHubIntegration {
     constructor(token) {
+        this.COMMENT_MARKER = '<!-- node-package-scanner-comment -->';
         this.context = github.context;
         const finalToken = token || core.getInput('github-token') || process.env.GITHUB_TOKEN || '';
         this.hasValidToken = !!finalToken;
         if (this.hasValidToken) {
             this.octokit = github.getOctokit(finalToken);
+        }
+    }
+    async findExistingComment(prNumber) {
+        try {
+            const comments = await this.octokit.rest.issues.listComments({
+                owner: this.context.repo.owner,
+                repo: this.context.repo.repo,
+                issue_number: prNumber,
+            });
+            const existingComment = comments.data.find((comment) => comment.body?.includes(this.COMMENT_MARKER));
+            return existingComment?.id ?? null;
+        }
+        catch (error) {
+            console.error("Failed to list PR comments:", error);
+            return null;
         }
     }
     async postPRComment(summary) {
@@ -492,12 +516,25 @@ class GitHubIntegration {
             console.log('Not running in a pull request context, skipping comment');
             return;
         }
+        const prNumber = this.context.payload.pull_request.number;
         const comment = this.generateComment(summary);
+        const existingCommentId = await this.findExistingComment(prNumber);
         try {
+            // If comment already exists update it
+            if (existingCommentId) {
+                await this.octokit.rest.issues.updateComment({
+                    owner: this.context.repo.owner,
+                    repo: this.context.repo.repo,
+                    comment_id: existingCommentId,
+                    body: comment,
+                });
+                console.log("✓ Updated existing comment on PR");
+                return;
+            }
             await this.octokit.rest.issues.createComment({
                 owner: this.context.repo.owner,
                 repo: this.context.repo.repo,
-                issue_number: this.context.payload.pull_request.number,
+                issue_number: prNumber,
                 body: comment
             });
             console.log('✓ Posted comment to PR');
@@ -508,7 +545,7 @@ class GitHubIntegration {
     }
     generateComment(summary) {
         const { compromisedPackages, scanResults, usingCachedList } = summary;
-        let comment = '## 🚨 Compromised Node Package Detection\n\n';
+        let comment = `${this.COMMENT_MARKER}\n## 🚨 Compromised Node Package Detection\n\n`;
         if (compromisedPackages.length === 0) {
             comment += '✅ **No compromised packages detected**\n\n';
             comment += `Scanned ${summary.totalFiles} package manager files.\n`;
