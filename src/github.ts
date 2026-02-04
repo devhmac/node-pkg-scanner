@@ -51,7 +51,7 @@ export class GitHubIntegration {
     const existingCommentId = await this.findExistingComment(prNumber);
     
     try {
-      // If comment already exists update it
+      // If scanner comment already exists update it
       if (existingCommentId) {
         await this.octokit!.rest.issues.updateComment({
           owner: this.context.repo.owner,
