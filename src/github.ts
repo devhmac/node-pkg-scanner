@@ -78,7 +78,7 @@ export class GitHubIntegration {
   private generateComment(summary: ScanSummary): string {
     const { compromisedPackages, scanResults, usingCachedList } = summary;
     
-    let comment = '## 🚨 Compromised Node Package Detection\n\n';
+    let comment = `${this.COMMENT_MARKER}\n## 🚨 Compromised Node Package Detection\n\n`;
     
     if (compromisedPackages.length === 0) {
       comment += '✅ **No compromised packages detected**\n\n';
